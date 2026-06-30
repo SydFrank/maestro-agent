@@ -22,8 +22,7 @@ from typing import Annotated, Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from agent_common.logging import get_logger
-from agent_common.schemas import AgentStep, Citation, TokenUsage
-from app.agents import critic as critic_mod
+from agent_common.schemas import AgentStep, TokenUsage
 from app.agents import supervisor as sup
 from app.agents.roster import WORKERS
 from app.guardrails import detect_prompt_injection
@@ -102,8 +101,6 @@ async def dispatch_workers(state: MAState) -> MAState:
         new_results[r.name] = r.answer
         steps.extend(r.steps)
         _add_usage(state, r.usage)
-        if r.name == "knowledge":  # the RAG worker → answer must be grounded
-            state["used_rag"] = True
     return {"prior_results": new_results, "steps": steps}
 
 
@@ -117,18 +114,27 @@ async def synthesize(state: MAState) -> MAState:
 
 
 async def critic_review(state: MAState) -> MAState:
-    citations = [Citation.model_validate(c) for c in state["ctx"].get("_citations", [])]
-    verdict, usage = await critic_mod.review(
-        question=state["question"],
-        answer=state.get("answer", ""),
-        citations=citations,
-        used_rag=state.get("used_rag", False),
-    )
-    _add_usage(state, usage)
+    """Coding critic = the objective test gate.
+
+    The agent can't *claim* a fix — the only acceptable evidence is the sandbox
+    test suite passing. If tests weren't run or didn't pass, the Critic rejects
+    and the graph gets one bounded revision round to try again.
+    """
+    last_test = state["ctx"].get("_last_test")
+    if last_test is None:
+        verdict = {"approved": False, "method": "test-gate",
+                   "passed": False, "issues": "尚未运行测试验证修复"}
+    elif last_test.get("passed"):
+        verdict = {"approved": True, "method": "test-gate",
+                   "passed": True, "issues": ""}
+    else:
+        verdict = {"approved": False, "method": "test-gate",
+                   "passed": False, "issues": "测试仍未通过，需继续修复"}
     return {
         "critic": verdict,
         "steps": [AgentStep(kind="final", name="critic",
-                            content=("通过" if verdict["approved"] else f"打回: {verdict['issues']}"),
+                            content=("测试通过 ✓" if verdict["approved"]
+                                     else f"未通过: {verdict['issues']}"),
                             meta=verdict)],
     }
 

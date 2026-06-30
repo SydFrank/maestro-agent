@@ -1,12 +1,13 @@
 [project]
-name = "order-service"
+name = "sandbox-runner"
 version = "0.1.0"
-description = "Mock business order system the agent integrates with (orders, logistics, refunds w/ HITL)."
+description = "Owns the agent's code workspace and runs its tests in isolation (coding agent)."
 requires-python = ">=3.12"
 dependencies = [
     "agent-common",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
+    "pytest>=8.0",
 ]
 
 [build-system]

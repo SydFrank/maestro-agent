@@ -1,63 +1,75 @@
-"""客服服务自动化的专职工人花名册。
+"""自动 Bug 修复 Agent 的专职工人花名册（coding 编制）。
 
-工人按**能力域**切分（不按任务步骤切），这样每个工人都是 Supervisor 能清晰
-推理的"专家"。加一个能力 = 加一条记录，编排图无需改动。
+工人按**能力域**切分，每个是 Supervisor 能清晰推理的"专家"。加能力 = 加一条
+记录，编排图无需改动。
 
-三个可派发工人：
-  - knowledge : 政策/FAQ 知识检索专家（RAG，带引用溯源）—— 只读
-  - order     : 订单与物流查询专家（调订单业务系统）—— 只读
-  - action    : 业务动作执行专家（发起退款等）—— 有副作用，落到人工审批
+修复一个 bug 的典型协作：
+  Coder 定位并改 → Tester 跑测试 → 没过则 Fixer 再改 → Tester 复测 → Reviewer 审查
+Supervisor 按工人返回的结果决定下一步派谁（顺序、可循环，受 max_supervisor_rounds 约束）。
 
-注：综合答复由 Supervisor 的 synthesize 节点完成，事实/合规核查由 Critic 完成，
-因此它们不在可派发工人列表里（避免与编排层职责重叠）。
+关键设计：测试是唯一的"对错裁判"（run_tests）。Agent 不能"声称"修好了，
+必须让沙箱里的测试真的通过——这从根上压制了幻觉。
 """
 
 from __future__ import annotations
 
 from app.agents.worker import WorkerAgent
 
-# 知识 Agent：政策/FAQ 检索专家。只配 knowledge_search（RAG）。
-KNOWLEDGE = WorkerAgent(
-    name="knowledge",
+# Coder：定位 bug 并提出修复。能搜、能读、能改。
+CODER = WorkerAgent(
+    name="coder",
     persona=(
-        "你是客服知识专家。职责：用 knowledge_search 在退换货政策、配送、保修等"
-        "FAQ/政策库中找到依据，给出**带引用**的准确回答。"
-        "政策类问题必须基于检索到的资料，资料没写的绝不臆测。"
+        "你是资深工程师，负责定位并修复 bug。流程：先用 search_code/read_file 找到"
+        "相关代码和根因，再用 edit_code 做最小化修改。改完简述你改了什么、为什么。"
+        "不要臆测，一切基于你读到的真实代码。"
     ),
-    tool_names=["knowledge_search"],
+    tool_names=["search_code", "read_file", "edit_code"],
+    max_iterations=8,
 )
 
-# 订单 Agent：订单与物流查询专家。只读，不做任何有副作用的操作。
-ORDER = WorkerAgent(
-    name="order",
+# Tester：在沙箱跑测试，给出客观结果。只读 + 执行，不改代码。
+TESTER = WorkerAgent(
+    name="tester",
     persona=(
-        "你是订单查询专家。职责：用 query_order / list_my_orders 查询用户的订单"
-        "状态、金额、物流信息。只陈述查到的真实信息，不编造，不执行退款等动作。"
+        "你是测试工程师。职责：用 run_tests 在沙箱运行测试套件，如实汇报通过与否"
+        "及失败信息。必要时用 read_file 查看测试。你不修改业务代码。"
     ),
-    tool_names=["query_order", "list_my_orders"],
+    tool_names=["run_tests", "read_file"],
+    max_iterations=3,
 )
 
-# 动作 Agent：执行有副作用的业务动作（退款）。退款只会进入待人工审批状态。
-ACTION = WorkerAgent(
-    name="action",
+# Fixer：测试仍失败时，结合失败信息再次修复。
+FIXER = WorkerAgent(
+    name="fixer",
     persona=(
-        "你是业务动作执行专家。职责：当用户明确要求且符合政策时，用 request_refund"
-        "发起退款申请。务必清楚告知用户：退款需人工审批，不会立即到账。"
-        "不要在政策不允许或信息不足时擅自发起动作。"
+        "你是调试专家。当测试仍然失败时介入：阅读失败输出和相关代码，找出上一次"
+        "修复为何不奏效，用 edit_code 做针对性修正。基于真实报错，不要瞎猜。"
     ),
-    tool_names=["request_refund"],
+    tool_names=["search_code", "read_file", "edit_code", "run_tests"],
+    max_iterations=8,
 )
 
-# 可被 Supervisor 派发的专职工人。
+# Reviewer：审查最终改动的质量与副作用（只读）。
+REVIEWER = WorkerAgent(
+    name="reviewer",
+    persona=(
+        "你是代码评审者。职责：用 read_file 查看最终改动，评估修复是否合理、是否引入"
+        "副作用或破坏其他功能、是否符合最小改动原则。只读，给出评审意见。"
+    ),
+    tool_names=["read_file", "search_code"],
+    max_iterations=4,
+)
+
 WORKERS: dict[str, WorkerAgent] = {
-    KNOWLEDGE.name: KNOWLEDGE,
-    ORDER.name: ORDER,
-    ACTION.name: ACTION,
+    CODER.name: CODER,
+    TESTER.name: TESTER,
+    FIXER.name: FIXER,
+    REVIEWER.name: REVIEWER,
 }
 
-# Supervisor 用于路由决策的能力清单。
 WORKER_CATALOG = {
-    "knowledge": "回答政策/FAQ 类问题（退换货、配送、保修等），带引用溯源",
-    "order": "查询用户的订单状态、金额与物流信息",
-    "action": "执行业务动作：为订单发起退款申请（需人工审批）",
+    "coder": "定位 bug 根因并提出修复（搜索/读取/修改代码）",
+    "tester": "在沙箱运行测试，客观判断当前代码是否通过",
+    "fixer": "测试仍失败时，结合报错做针对性再修复",
+    "reviewer": "审查最终改动的质量与副作用（只读）",
 }

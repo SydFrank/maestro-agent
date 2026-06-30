@@ -10,8 +10,8 @@ WORKDIR /app
 COPY packages/common /opt/common
 RUN pip install /opt/common
 
-COPY services/order-service/pyproject.toml ./
-COPY services/order-service/app ./app
+COPY services/sandbox-runner/pyproject.toml ./
+COPY services/sandbox-runner/app ./app
 RUN pip install .
 
 EXPOSE 8000

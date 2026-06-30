@@ -64,43 +64,46 @@ class RagClient:
         return RetrieveResponse.model_validate(resp.json()).citations
 
 
-class OrderClient:
-    """Client to the (mock) order business system."""
+class SandboxClient:
+    """Client to the sandbox-runner: the agent's code workspace + test runner."""
 
     def __init__(self) -> None:
         self._client = httpx.AsyncClient(
-            base_url=settings.order_service_url, timeout=15.0
+            base_url=settings.sandbox_runner_url, timeout=60.0
         )
 
-    async def get_order(self, order_id: str) -> dict:
-        resp = await self._client.get(f"/v1/orders/{order_id}", headers=_trace_headers())
-        if resp.status_code == 404:
-            return {"error": f"未找到订单 {order_id}"}
-        resp.raise_for_status()
-        return resp.json()
-
-    async def list_orders(self, *, tenant_id: str, user_id: str) -> dict:
-        resp = await self._client.get(
-            "/v1/orders",
-            params={"tenant_id": tenant_id, "user_id": user_id},
-            headers=_trace_headers(),
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    async def request_refund(self, order_id: str, reason: str) -> dict:
+    async def search(self, query: str, max_results: int = 25) -> dict:
         resp = await self._client.post(
-            f"/v1/orders/{order_id}/refund",
-            json={"reason": reason},
+            "/v1/search",
+            json={"query": query, "max_results": max_results},
             headers=_trace_headers(),
         )
-        if resp.status_code == 404:
-            return {"error": f"未找到订单 {order_id}"}
+        resp.raise_for_status()
+        return resp.json()
+
+    async def read_file(self, path: str) -> dict:
+        resp = await self._client.get(
+            "/v1/file", params={"path": path}, headers=_trace_headers()
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def edit_file(self, path: str, old: str, new: str) -> dict:
+        resp = await self._client.post(
+            "/v1/edit",
+            json={"path": path, "old": old, "new": new},
+            headers=_trace_headers(),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def run_tests(self) -> dict:
+        resp = await self._client.post("/v1/run", headers=_trace_headers())
         resp.raise_for_status()
         return resp.json()
 
 
 llm_client = LLMClient()
 rag_client = RagClient()
-order_client = OrderClient()
+sandbox_client = SandboxClient()
 
