@@ -1,12 +1,19 @@
-# Maestro · 多 Agent 自动 Bug 修复平台
+# Maestro · 面向 AI Coding 的企业级 Agent Runtime 与评测平台
+*Maestro: Enterprise AI Coding Agent Runtime + Evaluation Harness*
 
-> 一个**可落地、可演示、可上线**的企业级多 Agent 编排平台，首发场景为 **自动 Bug 修复（auto bug-fix）**。
-> 给定一个代码仓库 + 一个失败的测试，平台用 **Supervisor 编排 Coder / Tester / Reviewer / Fixer** 多个专职 Agent 协作，**自动定位、修复、并在沙箱中跑测试验证**，产出一份能通过测试的改动。
+> 一个**可落地、可演示、可上线**的 **Agent Runtime（运行时）+ Evaluation Harness（评测平台）**，专为 AI Coding 场景打造。
 >
-> 主模型 **Claude Opus 4.8**，OpenAI 为备选，通过 LLM 网关统一抽象、按需切换。
-> 技术范围覆盖：**Agent 编排 · 工具调用 · 沙箱执行 · 上下文工程 · 评测(Harness) · 安全 · 可观测 · 微服务 · 全栈 · 容器化**。
+> **首个落地场景：自动 Bug 修复。** 给定代码仓库与失败测试，系统通过多 Agent 协作（Supervisor 编排 Coder / Tester / Reviewer / Fixer）自动定位、修改、并在沙箱中跑测试验证，输出**经测试验证、可追溯**的修复结果。
+>
+> | 维度 | 内容 |
+> |---|---|
+> | **平台定位** | Agent Runtime（Tool / Memory / Context / Trace 抽象）+ Evaluation Harness（评测 / 回放 / 回归）|
+> | **落地场景** | AI Coding / 自动 Bug 修复 |
+> | **工程证明** | Sandbox 执行 · Trace 追溯 · Eval 评测 · Cost 计量 · Security 防护 |
+> | **模型** | Claude Opus 4.8（主）/ OpenAI（备），经 LLM 网关统一抽象、按需切换 |
 
-> 状态图例：✅ 已实现　🔨 规划中（设计已定，按路线图推进）
+> **状态标注（如实、不夸大）**：`✅ 已实现`（代码就绪）　·　`🔨 规划中／部分`
+> ⚠️ 项目处于**活跃开发**：端到端闭环仍在打通（见路线图 M1）。标 `✅` 指**代码已实现**，尚未全部经端到端验证——不夸大是对面试官最基本的诚实。
 
 ---
 
@@ -134,7 +141,24 @@
    —— 全程每一步都带 trace_id，可在日志/轨迹视图中重放
 ```
 
-### 2.5 Harness 评测体系（质量闭环 · 差异化核心）
+### 2.5 Agent Runtime 抽象（可复用的执行内核）
+
+Runtime 是"跑任何 coding agent"的通用内核——把 Agent 执行拆成一组清晰、可复用、可替换的抽象。自动 Bug 修复只是跑在它上面的第一个应用；换一套 Agent/工具就能变成别的 coding 场景（代码评审、重构、测试生成…）。
+
+| 抽象 | 定义 | 代码落点 | 状态 |
+|---|---|---|---|
+| **Agent** | 带 persona + 工具集 + ReAct 循环的专职角色 | `agents/worker.py` (`WorkerAgent`) | ✅ |
+| **Task** | Supervisor 分解并派发的子任务 | `multi_agent.py` (dispatch) | ✅ |
+| **Tool** | 统一注册的可调用能力（search/read/edit/run_tests）| `tools/base.py` 注册表 | ✅ |
+| **Context** | 每次调用喂给模型的上下文（隔离 + token 预算）| worker 上下文装配 | ✅🔨 |
+| **Memory** | 跨轮记忆（会话级）| `memory.py`（Redis 滑窗）| ✅🔨 |
+| **Trace** | 每步动作的可观测记录（贯穿全链路）| `AgentStep` + `trace_id` 日志 | ✅ |
+| **Policy** | 约束策略：步数预算 / 护栏 / 权限 / 成本闸 | `guardrails.py` + 有界循环 + settings | ✅🔨 |
+| **Run** | 一次完整执行（含全部 step + token/成本）| LangGraph state（`multi_agent`）| ✅ |
+
+> 面试点：把 Agent 执行**抽象成 Agent/Task/Tool/Context/Memory/Trace/Policy/Run 这 8 个一等概念**，正是"Agent Runtime"区别于"一段 Agent 脚本"的地方，也直接对应平台岗 JD 里的 "Tool/Memory/Context 抽象"。
+
+### 2.6 Harness 评测体系（质量闭环 · 差异化核心）
 
 Runtime 让 Agent "能跑"，**Harness 让 Agent "可信"**——它是给 Agent 做自动体检的一整套评测/回归/调试体系（对应 JD 的 "Harness Engineering"）。这是本项目最核心的差异化，也是"能演示的玩具"与"可上线的系统"的分界。
 
